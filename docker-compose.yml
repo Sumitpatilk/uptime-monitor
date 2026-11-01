@@ -31,6 +31,19 @@ services:
     volumes:
       - ./apps/api:/app
 
+  worker:
+    build: ./apps/api
+    container_name: uptime-monitor-worker
+    restart: unless-stopped
+    env_file:
+      - ./apps/api/.env
+    depends_on:
+      db:
+        condition: service_healthy
+    command: python -m app.worker.scheduler
+    volumes:
+      - ./apps/api:/app
+
   web:
     build: ./apps/web
     container_name: uptime-monitor-web
