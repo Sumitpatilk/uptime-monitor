@@ -1,0 +1,47 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: uptime-monitor-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: uptime_monitor
+      POSTGRES_USER: uptime_user
+      POSTGRES_PASSWORD: uptime_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U uptime_user -d uptime_monitor"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: ./apps/api
+    container_name: uptime-monitor-api
+    env_file:
+      - ./apps/api/.env
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    volumes:
+      - ./apps/api:/app
+
+  web:
+    build: ./apps/web
+    container_name: uptime-monitor-web
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api
+    volumes:
+      - ./apps/web:/app
+      - /app/node_modules
+    command: npm run dev -- --host 0.0.0.0
+
+volumes:
+  postgres_data:
