@@ -1,4 +1,3 @@
-from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -6,8 +5,8 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.models.entities import CheckResult, Incident, Monitor, Project
-from app.services.check_engine import perform_http_check
+from app.models.entities import CheckResult, Monitor, Project
+from app.services.check_runner import run_monitor_check as execute_monitor_check
 
 
 router = APIRouter(
@@ -40,63 +39,6 @@ def get_project_monitor(
     return monitor
 
 
-def update_incident_status(
-    monitor_id: UUID,
-    db: Session,
-):
-    # Fetch the latest three check results.
-    statement = (
-        select(CheckResult.status)
-        .where(CheckResult.monitor_id == monitor_id)
-        .order_by(
-            desc(CheckResult.checked_at),
-            desc(CheckResult.id),
-        )
-        .limit(3)
-    )
-
-    recent_statuses = db.scalars(statement).all()
-
-    # Find an existing open incident.
-    incident_statement = (
-        select(Incident)
-        .where(
-            Incident.monitor_id == monitor_id,
-            Incident.state == "open",
-        )
-        .order_by(desc(Incident.started_at))
-        .limit(1)
-    )
-
-    open_incident = db.scalars(incident_statement).first()
-
-    # Three consecutive failures: open an incident.
-    if (
-        len(recent_statuses) >= 3
-        and all(check_status == "down" for check_status in recent_statuses)
-    ):
-        if not open_incident:
-            incident = Incident(
-                monitor_id=monitor_id,
-                state="open",
-                summary="Monitor is down after 3 consecutive failed checks.",
-            )
-
-            db.add(incident)
-
-    # Two consecutive successful checks: resolve an incident.
-    if (
-        len(recent_statuses) >= 2
-        and all(check_status == "up" for check_status in recent_statuses[:2])
-    ):
-        if open_incident:
-            open_incident.state = "resolved"
-            open_incident.resolved_at = datetime.now(timezone.utc)
-            open_incident.summary = (
-                "Monitor recovered after 2 consecutive successful checks."
-            )
-
-
 @router.post(
     "/{monitor_id}/check",
     status_code=status.HTTP_201_CREATED,
@@ -114,24 +56,11 @@ def run_monitor_check(
             detail="This monitor is disabled.",
         )
 
-    # Execute HTTP check.
-    check_data = perform_http_check(monitor)
-
-    # Save check result.
-    check_result = CheckResult(
-        monitor_id=monitor.id,
-        **check_data,
-    )
-
-    db.add(check_result)
-    db.flush()
-
-    # Evaluate incident conditions using saved check history.
-    update_incident_status(monitor.id, db)
-
-    # Save check and incident changes.
-    db.commit()
-    db.refresh(check_result)
+    try:
+        check_result = execute_monitor_check(monitor, db)
+    except Exception:
+        db.rollback()
+        raise
 
     return {
         "id": str(check_result.id),
