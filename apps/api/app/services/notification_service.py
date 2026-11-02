@@ -221,6 +221,13 @@ def process_notification_event(
                 "Related monitor not found.",
             )
             return
+        if channel.project_id != monitor.project_id:
+            _mark_failed(
+                event,
+                db,
+                "Alert channel and monitor belong to different projects.",
+            )
+            return
 
         subject, body = build_notification_content(
             event,

@@ -1,11 +1,24 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import Literal
 
+from pydantic import Field, SecretStr, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, SecretStr, field_validator, model_validator
 
 class Settings(BaseSettings):
     app_name: str = "Website & API Uptime Monitor"
     app_env: str = "development"
     database_url: str
     cors_origins: str = "http://localhost:5173"
+
+    # JWT authentication
+    jwt_secret_key: SecretStr
+    jwt_algorithm: Literal["HS256"] = "HS256"
+    access_token_expire_minutes: int = Field(default=15, ge=1, le=60)
+    refresh_token_expire_days: int = Field(default=7, ge=1, le=30)
+
+    # Authentication cookies
+    cookie_secure: bool = False
+    cookie_samesite: Literal["lax", "strict", "none"] = "lax"
 
     # SMTP email configuration
     smtp_host: str | None = None
@@ -20,6 +33,20 @@ class Settings(BaseSettings):
         env_file=".env",
         extra="ignore",
     )
+
+    @field_validator("cookie_samesite")
+    @classmethod
+    def validate_cookie_samesite(cls, value: str) -> str:
+        return value.lower()
+
+    @model_validator(mode="after")
+    def validate_cookie_security(self):
+       if self.cookie_samesite == "none" and not self.cookie_secure:
+        raise ValueError(
+            "COOKIE_SECURE must be true when COOKIE_SAMESITE is none."
+        )
+
+       return self
 
     @property
     def cors_origin_list(self) -> list[str]:

@@ -1,11 +1,14 @@
+
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
+from app.core.csrf import verify_request_origin
+from app.core.dependencies import get_current_user
 from app.db.session import get_db
-from app.models.entities import CheckResult, Monitor, Project
+from app.models.entities import CheckResult, Monitor, Project, User
 from app.services.check_runner import run_monitor_check as execute_monitor_check
 
 
@@ -15,12 +18,18 @@ router = APIRouter(
 )
 
 
-def get_project_monitor(
+def get_owned_project_monitor(
     project_id: UUID,
     monitor_id: UUID,
+    owner_id: UUID,
     db: Session,
-):
-    project = db.get(Project, project_id)
+) -> Monitor:
+    project = db.scalar(
+        select(Project).where(
+            Project.id == project_id,
+            Project.owner_id == owner_id,
+        )
+    )
 
     if not project:
         raise HTTPException(
@@ -28,9 +37,14 @@ def get_project_monitor(
             detail="Project not found.",
         )
 
-    monitor = db.get(Monitor, monitor_id)
+    monitor = db.scalar(
+        select(Monitor).where(
+            Monitor.id == monitor_id,
+            Monitor.project_id == project_id,
+        )
+    )
 
-    if not monitor or monitor.project_id != project_id:
+    if not monitor:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Monitor not found.",
@@ -42,13 +56,20 @@ def get_project_monitor(
 @router.post(
     "/{monitor_id}/check",
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(verify_request_origin)],
 )
 def run_monitor_check(
     project_id: UUID,
     monitor_id: UUID,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    monitor = get_project_monitor(project_id, monitor_id, db)
+    monitor = get_owned_project_monitor(
+        project_id,
+        monitor_id,
+        current_user.id,
+        db,
+    )
 
     if not monitor.enabled:
         raise HTTPException(
@@ -79,9 +100,15 @@ def get_monitor_check_history(
     monitor_id: UUID,
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    monitor = get_project_monitor(project_id, monitor_id, db)
+    monitor = get_owned_project_monitor(
+        project_id,
+        monitor_id,
+        current_user.id,
+        db,
+    )
 
     statement = (
         select(CheckResult)

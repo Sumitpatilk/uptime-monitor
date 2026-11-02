@@ -9,7 +9,7 @@ from app.routes.alert_channels import router as alert_channels_router
 from app.routes.checks import router as checks_router
 from app.routes.monitors import router as monitors_router
 from app.routes.projects import router as projects_router
-
+from app.routes.auth import router as auth_router
 
 app = FastAPI(
     title=settings.app_name,
@@ -22,6 +22,7 @@ app.include_router(projects_router)
 app.include_router(monitors_router)
 app.include_router(checks_router)
 app.include_router(alert_channels_router)
+app.include_router(auth_router)
 
 app.add_middleware(
     CORSMiddleware,

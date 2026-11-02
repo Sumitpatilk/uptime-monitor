@@ -1,11 +1,14 @@
+
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.csrf import verify_request_origin
+from app.core.dependencies import get_current_user
 from app.db.session import get_db
-from app.models.entities import AlertChannel, Project
+from app.models.entities import AlertChannel, Project, User
 from app.schemas.alert_channel import (
     AlertChannelCreate,
     AlertChannelRead,
@@ -19,11 +22,17 @@ router = APIRouter(
 )
 
 
-def get_project_or_404(
+def get_owned_project(
     project_id: UUID,
+    owner_id: UUID,
     db: Session,
 ) -> Project:
-    project = db.get(Project, project_id)
+    project = db.scalar(
+        select(Project).where(
+            Project.id == project_id,
+            Project.owner_id == owner_id,
+        )
+    )
 
     if not project:
         raise HTTPException(
@@ -38,13 +47,15 @@ def get_project_or_404(
     "",
     response_model=AlertChannelRead,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(verify_request_origin)],
 )
 def create_alert_channel(
     project_id: UUID,
     payload: AlertChannelCreate,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    get_project_or_404(project_id, db)
+    get_owned_project(project_id, current_user.id, db)
 
     existing_channel = db.scalar(
         select(AlertChannel).where(
@@ -80,9 +91,10 @@ def create_alert_channel(
 )
 def list_alert_channels(
     project_id: UUID,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    get_project_or_404(project_id, db)
+    get_owned_project(project_id, current_user.id, db)
 
     statement = (
         select(AlertChannel)
@@ -96,14 +108,16 @@ def list_alert_channels(
 @router.patch(
     "/{channel_id}",
     response_model=AlertChannelRead,
+    dependencies=[Depends(verify_request_origin)],
 )
 def update_alert_channel(
     project_id: UUID,
     channel_id: UUID,
     payload: AlertChannelUpdate,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    get_project_or_404(project_id, db)
+    get_owned_project(project_id, current_user.id, db)
 
     alert_channel = db.scalar(
         select(AlertChannel).where(
@@ -129,13 +143,15 @@ def update_alert_channel(
 @router.delete(
     "/{channel_id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(verify_request_origin)],
 )
 def delete_alert_channel(
     project_id: UUID,
     channel_id: UUID,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    get_project_or_404(project_id, db)
+    get_owned_project(project_id, current_user.id, db)
 
     alert_channel = db.scalar(
         select(AlertChannel).where(
@@ -153,4 +169,4 @@ def delete_alert_channel(
     db.delete(alert_channel)
     db.commit()
 
-    return None
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

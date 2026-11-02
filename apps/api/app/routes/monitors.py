@@ -5,8 +5,10 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.csrf import verify_request_origin
+from app.core.dependencies import get_current_user
 from app.db.session import get_db
-from app.models.entities import Monitor, Project
+from app.models.entities import Monitor, Project, User
 from app.schemas.monitor import MonitorCreate, MonitorRead, MonitorUpdate
 
 
@@ -16,8 +18,17 @@ router = APIRouter(
 )
 
 
-def get_existing_project(project_id: UUID, db: Session) -> Project:
-    project = db.get(Project, project_id)
+def get_owned_project(
+    project_id: UUID,
+    owner_id: UUID,
+    db: Session,
+) -> Project:
+    project = db.scalar(
+        select(Project).where(
+            Project.id == project_id,
+            Project.owner_id == owner_id,
+        )
+    )
 
     if not project:
         raise HTTPException(
@@ -32,13 +43,15 @@ def get_existing_project(project_id: UUID, db: Session) -> Project:
     "",
     response_model=MonitorRead,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(verify_request_origin)],
 )
 def create_monitor(
     project_id: UUID,
     payload: MonitorCreate,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    get_existing_project(project_id, db)
+    get_owned_project(project_id, current_user.id, db)
 
     monitor = Monitor(
         project_id=project_id,
@@ -55,9 +68,10 @@ def create_monitor(
 @router.get("", response_model=list[MonitorRead])
 def list_monitors(
     project_id: UUID,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    get_existing_project(project_id, db)
+    get_owned_project(project_id, current_user.id, db)
 
     statement = (
         select(Monitor)
@@ -68,14 +82,19 @@ def list_monitors(
     return db.scalars(statement).all()
 
 
-@router.patch("/{monitor_id}", response_model=MonitorRead)
+@router.patch(
+    "/{monitor_id}",
+    response_model=MonitorRead,
+    dependencies=[Depends(verify_request_origin)],
+)
 def update_monitor(
     project_id: UUID,
     monitor_id: UUID,
     payload: MonitorUpdate,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    get_existing_project(project_id, db)
+    get_owned_project(project_id, current_user.id, db)
 
     monitor = db.scalar(
         select(Monitor).where(
@@ -110,13 +129,15 @@ def update_monitor(
 @router.delete(
     "/{monitor_id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(verify_request_origin)],
 )
 def delete_monitor(
     project_id: UUID,
     monitor_id: UUID,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    get_existing_project(project_id, db)
+    get_owned_project(project_id, current_user.id, db)
 
     monitor = db.scalar(
         select(Monitor).where(

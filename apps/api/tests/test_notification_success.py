@@ -20,11 +20,12 @@ def test_notification_is_marked_sent_after_successful_email(monkeypatch):
     )
 
     channel = SimpleNamespace(
-        id="channel-1",
-        type="email",
-        destination="sumit@example.com",
-        enabled=True,
-    )
+    id="channel-1",
+    project_id="project-1",
+    type="email",
+    destination="sumit@example.com",
+    enabled=True,
+)
 
     incident = SimpleNamespace(
         id="incident-1",
@@ -33,10 +34,11 @@ def test_notification_is_marked_sent_after_successful_email(monkeypatch):
     )
 
     monitor = SimpleNamespace(
-        id="monitor-1",
-        name="Example Website",
-        url="https://example.com",
-    )
+    id="monitor-1",
+    project_id="project-1",
+    name="Example Website",
+    url="https://example.com",
+)
 
     db = MagicMock()
     db.get.side_effect = [

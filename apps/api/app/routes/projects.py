@@ -1,9 +1,12 @@
+
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.csrf import verify_request_origin
+from app.core.dependencies import get_current_user
 from app.db.session import get_db
 from app.models.entities import (
     AlertChannel,
@@ -47,22 +50,15 @@ def get_owned_project(
     "",
     response_model=ProjectRead,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(verify_request_origin)],
 )
 def create_project(
     payload: ProjectCreate,
-    owner_id: UUID,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    user = db.get(User, owner_id)
-
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found.",
-        )
-
     project = Project(
-        owner_id=owner_id,
+        owner_id=current_user.id,
         name=payload.name,
     )
 
@@ -75,12 +71,12 @@ def create_project(
 
 @router.get("", response_model=list[ProjectRead])
 def list_projects(
-    owner_id: UUID,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     statement = (
         select(Project)
-        .where(Project.owner_id == owner_id)
+        .where(Project.owner_id == current_user.id)
         .order_by(Project.created_at.desc())
     )
 
@@ -90,20 +86,24 @@ def list_projects(
 @router.get("/{project_id}", response_model=ProjectRead)
 def get_project(
     project_id: UUID,
-    owner_id: UUID,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    return get_owned_project(project_id, owner_id, db)
+    return get_owned_project(project_id, current_user.id, db)
 
 
-@router.patch("/{project_id}", response_model=ProjectRead)
+@router.patch(
+    "/{project_id}",
+    response_model=ProjectRead,
+    dependencies=[Depends(verify_request_origin)],
+)
 def update_project(
     project_id: UUID,
     payload: ProjectUpdate,
-    owner_id: UUID,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    project = get_owned_project(project_id, owner_id, db)
+    project = get_owned_project(project_id, current_user.id, db)
 
     update_data = payload.model_dump(exclude_unset=True)
 
@@ -122,13 +122,17 @@ def update_project(
     return project
 
 
-@router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{project_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(verify_request_origin)],
+)
 def delete_project(
     project_id: UUID,
-    owner_id: UUID,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    project = get_owned_project(project_id, owner_id, db)
+    project = get_owned_project(project_id, current_user.id, db)
 
     dependent_models = (
         Monitor,

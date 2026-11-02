@@ -38,6 +38,7 @@ def test_notification_retry_backoff(
 
     channel = SimpleNamespace(
         id="channel-1",
+        project_id="project-1",
         type="email",
         destination="sumit@example.com",
         enabled=True,
@@ -51,6 +52,7 @@ def test_notification_retry_backoff(
 
     monitor = SimpleNamespace(
         id="monitor-1",
+        project_id="project-1",
         name="Example Website",
         url="https://example.com",
     )
