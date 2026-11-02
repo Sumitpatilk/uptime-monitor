@@ -5,8 +5,9 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.config import settings
 from app.db.session import engine
-from app.routes.monitors import router as monitors_router
+from app.routes.alert_channels import router as alert_channels_router
 from app.routes.checks import router as checks_router
+from app.routes.monitors import router as monitors_router
 from app.routes.projects import router as projects_router
 
 
@@ -20,7 +21,7 @@ app = FastAPI(
 app.include_router(projects_router)
 app.include_router(monitors_router)
 app.include_router(checks_router)
-
+app.include_router(alert_channels_router)
 
 app.add_middleware(
     CORSMiddleware,

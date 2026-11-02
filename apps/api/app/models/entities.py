@@ -56,21 +56,83 @@ class Incident(Base):
 
 class AlertChannel(Base):
     __tablename__ = "alert_channels"
+
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=new_id)
     project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
     type: Mapped[str] = mapped_column(String(30), nullable=False)
-    destination_secret_ref: Mapped[str] = mapped_column(Text, nullable=False)
+    destination: Mapped[str] = mapped_column(Text, nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
 
 class NotificationEvent(Base):
     __tablename__ = "notification_events"
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=new_id)
-    incident_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("incidents.id", ondelete="CASCADE"), nullable=False, index=True)
-    channel_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("alert_channels.id", ondelete="CASCADE"), nullable=False)
-    event_type: Mapped[str] = mapped_column(String(30), nullable=False)
-    status: Mapped[str] = mapped_column(String(30), nullable=False, default="pending")
-    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "incident_id",
+            "channel_id",
+            "event_type",
+            name="uq_notification_incident_channel_event",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=new_id,
+    )
+
+    incident_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("incidents.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    channel_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("alert_channels.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    event_type: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+    )
+
+    status: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+        default="pending",
+    )
+
+    attempts: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
+
+    sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    last_error: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    next_attempt_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+    )
+
+    locked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+    )
 
 class StatusPage(Base):
     __tablename__ = "status_pages"

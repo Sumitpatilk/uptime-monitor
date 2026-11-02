@@ -35,6 +35,7 @@ services:
     build: ./apps/api
     container_name: uptime-monitor-worker
     restart: unless-stopped
+    stop_grace_period: 1m
     env_file:
       - ./apps/api/.env
     depends_on:
