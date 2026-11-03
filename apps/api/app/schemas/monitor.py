@@ -8,7 +8,9 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-def validate_public_url(value: str) -> str:
+def resolve_public_url(
+    value: str,
+) -> tuple[str, int, set[ipaddress.IPv4Address | ipaddress.IPv6Address]]:
     try:
         parsed = urlsplit(value)
 
@@ -34,7 +36,9 @@ def validate_public_url(value: str) -> str:
             addresses = {ipaddress.ip_address(host)}
         except ValueError:
             records = socket.getaddrinfo(
-                host, port, type=socket.SOCK_STREAM
+                host,
+                port,
+                type=socket.SOCK_STREAM,
             )
             addresses = {
                 ipaddress.ip_address(record[4][0].split("%")[0])
@@ -49,13 +53,17 @@ def validate_public_url(value: str) -> str:
                 "Private or reserved IP addresses are not allowed."
             )
 
-        return value
+        return host, port, addresses
 
     except ValueError as exc:
         raise ValueError(str(exc)) from exc
-    except socket.gaierror as exc:
+    except OSError as exc:
         raise ValueError("Hostname could not be resolved.") from exc
 
+
+def validate_public_url(value: str) -> str:
+    resolve_public_url(value)
+    return value
 
 class MonitorCreate(BaseModel):
     name: str = Field(min_length=1, max_length=150)

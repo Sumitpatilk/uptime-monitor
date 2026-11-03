@@ -1,8 +1,13 @@
 from typing import Literal
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import (
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field, SecretStr, field_validator, model_validator
+
 
 class Settings(BaseSettings):
     app_name: str = "Website & API Uptime Monitor"
@@ -29,6 +34,18 @@ class Settings(BaseSettings):
     smtp_use_tls: bool = True
     smtp_timeout_seconds: int = 10
 
+    # Incident detection configuration
+    incident_failure_threshold: int = Field(
+        default=3,
+        ge=1,
+        le=20,
+    )
+    incident_recovery_threshold: int = Field(
+        default=2,
+        ge=1,
+        le=20,
+    )
+
     model_config = SettingsConfigDict(
         env_file=".env",
         extra="ignore",
@@ -41,12 +58,12 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_cookie_security(self):
-       if self.cookie_samesite == "none" and not self.cookie_secure:
-        raise ValueError(
-            "COOKIE_SECURE must be true when COOKIE_SAMESITE is none."
-        )
+        if self.cookie_samesite == "none" and not self.cookie_secure:
+            raise ValueError(
+                "COOKIE_SECURE must be true when COOKIE_SAMESITE is none."
+            )
 
-       return self
+        return self
 
     @property
     def cors_origin_list(self) -> list[str]:

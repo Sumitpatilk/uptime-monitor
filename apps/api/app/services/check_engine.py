@@ -1,15 +1,17 @@
 import time
+from urllib.parse import urlsplit
 
 import httpx
 
-from app.schemas.monitor import validate_public_url
+from app.schemas.monitor import resolve_public_url
 
 
 def perform_http_check(monitor) -> dict:
     """
-    Perform one HTTP check for a monitor.
+    Perform one HTTP check using a DNS-validated, pinned public IP.
 
-    This MVP version does not follow redirects or store response bodies.
+    The original hostname is retained for the Host header and TLS SNI.
+    Redirects are disabled and response bodies are never stored.
     """
 
     start_time = time.perf_counter()
@@ -22,20 +24,43 @@ def perform_http_check(monitor) -> dict:
     }
 
     try:
-        # Validate URL again immediately before making the request.
-        validate_public_url(monitor.url)
+        # Resolve and validate every DNS result immediately before the request.
+        host, port, addresses = resolve_public_url(monitor.url)
+
+        # Select one validated public IP deterministically.
+        pinned_ip = sorted(
+            addresses,
+            key=lambda address: (address.version, int(address)),
+        )[0]
+
+        original_url = httpx.URL(monitor.url)
+
+        # Replace the hostname in the connection URL with the validated IP.
+        pinned_url = original_url.copy_with(host=str(pinned_ip))
+
+        # Preserve the original HTTP authority, including an explicit port.
+        original_authority = urlsplit(monitor.url).netloc
 
         timeout = httpx.Timeout(monitor.timeout_seconds)
 
-        # Redirects are disabled to avoid following an unchecked URL.
-        # Response body is not read or stored.
         with httpx.Client(
             timeout=timeout,
             follow_redirects=False,
             trust_env=False,
         ) as client:
 
-            with client.stream("GET", monitor.url) as response:
+            # Send directly to the pinned IP while preserving Host and TLS SNI.
+            with client.stream(
+                "GET",
+                pinned_url,
+                headers={
+                    "Host": original_authority,
+                },
+                extensions={
+                    "sni_hostname": host,
+                },
+            ) as response:
+
                 result["status_code"] = response.status_code
 
                 result["status"] = (
@@ -46,7 +71,6 @@ def perform_http_check(monitor) -> dict:
 
                 if result["status"] == "down":
                     result["error_code"] = "unexpected_status"
-
     except ValueError:
         result["error_code"] = "unsafe_url"
 

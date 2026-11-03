@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.models.entities import (
     AlertChannel,
     CheckResult,
@@ -58,6 +59,14 @@ def update_incident_status(
     monitor,
     db: Session,
 ):
+    failure_threshold = settings.incident_failure_threshold
+    recovery_threshold = settings.incident_recovery_threshold
+
+    required_history = max(
+        failure_threshold,
+        recovery_threshold,
+    )
+
     statement = (
         select(CheckResult.status)
         .where(CheckResult.monitor_id == monitor.id)
@@ -65,7 +74,7 @@ def update_incident_status(
             desc(CheckResult.checked_at),
             desc(CheckResult.id),
         )
-        .limit(3)
+        .limit(required_history)
     )
 
     recent_statuses = db.scalars(statement).all()
@@ -82,16 +91,22 @@ def update_incident_status(
 
     open_incident = db.scalars(incident_statement).first()
 
-    # Open an incident after 3 consecutive failed checks.
+    # Open an incident after the configured consecutive failures.
     if (
-        len(recent_statuses) >= 3
-        and all(check_status == "down" for check_status in recent_statuses)
+        len(recent_statuses) >= failure_threshold
+        and all(
+            status == "down"
+            for status in recent_statuses[:failure_threshold]
+        )
     ):
         if not open_incident:
             new_incident = Incident(
                 monitor_id=monitor.id,
                 state="open",
-                summary="Monitor is down after 3 consecutive failed checks.",
+                summary=(
+                    "Monitor is down after "
+                    f"{failure_threshold} consecutive failed checks."
+                ),
             )
 
             db.add(new_incident)
@@ -104,16 +119,20 @@ def update_incident_status(
                 db=db,
             )
 
-    # Resolve an open incident after 2 consecutive successful checks.
+    # Resolve an open incident after configured consecutive successes.
     if (
-        len(recent_statuses) >= 2
-        and all(check_status == "up" for check_status in recent_statuses[:2])
+        len(recent_statuses) >= recovery_threshold
+        and all(
+            status == "up"
+            for status in recent_statuses[:recovery_threshold]
+        )
     ):
         if open_incident:
             open_incident.state = "resolved"
             open_incident.resolved_at = datetime.now(timezone.utc)
             open_incident.summary = (
-                "Monitor recovered after 2 consecutive successful checks."
+                "Monitor recovered after "
+                f"{recovery_threshold} consecutive successful checks."
             )
 
             create_notification_events(
