@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 from sqlalchemy import desc, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -11,6 +12,14 @@ from app.models.entities import (
     NotificationEvent,
 )
 from app.services.check_engine import perform_http_check
+
+
+class MonitorNotFoundError(LookupError):
+    """Raised when a monitor disappears before its check starts."""
+
+
+class MonitorDisabledError(ValueError):
+    """Raised when a monitor is disabled before its check starts."""
 
 
 def create_notification_events(
@@ -33,26 +42,21 @@ def create_notification_events(
     ).all()
 
     for channel in channels:
-        existing_event = db.scalar(
-            select(NotificationEvent).where(
-                NotificationEvent.incident_id == incident.id,
-                NotificationEvent.channel_id == channel.id,
-                NotificationEvent.event_type == event_type,
-            )
-        )
-
-        if existing_event:
-            continue
-
-        db.add(
-            NotificationEvent(
+        statement = (
+            pg_insert(NotificationEvent)
+            .values(
                 incident_id=incident.id,
                 channel_id=channel.id,
                 event_type=event_type,
                 status="pending",
                 attempts=0,
             )
+            .on_conflict_do_nothing(
+                constraint="uq_notification_incident_channel_event"
+            )
         )
+
+        db.execute(statement)
 
 
 def update_incident_status(
@@ -143,21 +147,49 @@ def update_incident_status(
             )
 
 
-def run_monitor_check(monitor, db: Session) -> CheckResult:
-    if not monitor.enabled:
-        raise ValueError("This monitor is disabled.")
+def run_monitor_check(
+    monitor,
+    db: Session,
+    *,
+    monitor_locked: bool = False,
+) -> CheckResult:
+    """
+    Execute a monitor check while holding its database row lock.
 
-    check_data = perform_http_check(monitor)
+    Manual API checks acquire the lock here.
+    The scheduler may pass monitor_locked=True after acquiring
+    the row with SELECT FOR UPDATE SKIP LOCKED.
+    """
+
+    from app.models.entities import Monitor
+
+    if monitor_locked:
+        locked_monitor = monitor
+    else:
+        locked_monitor = db.scalar(
+            select(Monitor)
+            .where(Monitor.id == monitor.id)
+            .execution_options(populate_existing=True)
+            .with_for_update()
+        )
+
+    if locked_monitor is None:
+        raise MonitorNotFoundError("Monitor no longer exists.")
+
+    if not locked_monitor.enabled:
+        raise MonitorDisabledError("This monitor is disabled.")
+
+    check_data = perform_http_check(locked_monitor)
 
     check_result = CheckResult(
-        monitor_id=monitor.id,
+        monitor_id=locked_monitor.id,
         **check_data,
     )
 
     db.add(check_result)
     db.flush()
 
-    update_incident_status(monitor, db)
+    update_incident_status(locked_monitor, db)
 
     db.commit()
     db.refresh(check_result)

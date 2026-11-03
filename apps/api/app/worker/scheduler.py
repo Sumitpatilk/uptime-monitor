@@ -2,6 +2,7 @@
 import logging
 import signal
 import threading
+import time
 from datetime import datetime, timezone
 
 from sqlalchemy import func, select
@@ -12,9 +13,11 @@ from app.db.session import SessionLocal
 from app.models.entities import CheckResult, Monitor
 from app.services.check_runner import run_monitor_check
 from app.services.notification_service import process_due_notifications
+from app.services.retention_service import cleanup_old_check_results
 
 
 POLL_INTERVAL_SECONDS = 5
+RETENTION_CLEANUP_INTERVAL_SECONDS = 3600
 
 shutdown_event = threading.Event()
 
@@ -110,7 +113,7 @@ def process_due_monitors(
                 monitor.id,
             )
 
-            result = run_monitor_check(monitor, db)
+            result = run_monitor_check(monitor, db, monitor_locked=True)
 
             logger.info(
                 "Check completed: monitor='%s', status='%s', "
@@ -137,6 +140,7 @@ def run_scheduler():
     signal.signal(signal.SIGINT, handle_shutdown_signal)
 
     shutdown_event.clear()
+    last_retention_cleanup = 0.0
 
     logger.info(
         "Uptime Monitor Scheduler started. Poll interval: %s seconds",
@@ -151,6 +155,30 @@ def run_scheduler():
                 process_due_monitors(db, shutdown_event)
 
                 process_due_notifications(db, shutdown_event)
+
+                current_monotonic = time.monotonic()
+                if (
+                    not shutdown_event.is_set()
+                    and current_monotonic - last_retention_cleanup
+                    >= RETENTION_CLEANUP_INTERVAL_SECONDS
+                ):
+                    last_retention_cleanup = current_monotonic
+                    retention_db = SessionLocal()
+                    try:
+                        deleted_count = cleanup_old_check_results(
+                            retention_db
+                        )
+                        logger.info(
+                            "Retention cleanup cycle completed: "
+                            "deleted_count=%s",
+                            deleted_count,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "Retention cleanup cycle failed"
+                        )
+                    finally:
+                        retention_db.close()
 
             except SQLAlchemyError:
                 db.rollback()

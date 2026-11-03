@@ -1,15 +1,20 @@
 
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import desc, select
+from sqlalchemy import case, desc, func, select
 from sqlalchemy.orm import Session
 
 from app.core.csrf import verify_request_origin
 from app.core.dependencies import get_current_user
 from app.db.session import get_db
 from app.models.entities import CheckResult, Monitor, Project, User
-from app.services.check_runner import run_monitor_check as execute_monitor_check
+from app.services.check_runner import (
+    MonitorDisabledError,
+    MonitorNotFoundError,
+    run_monitor_check as execute_monitor_check,
+)
 
 
 router = APIRouter(
@@ -79,6 +84,21 @@ def run_monitor_check(
 
     try:
         check_result = execute_monitor_check(monitor, db)
+
+    except MonitorNotFoundError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+
+    except MonitorDisabledError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+
     except Exception:
         db.rollback()
         raise
@@ -138,5 +158,85 @@ def get_monitor_check_history(
                 "error_code": check.error_code,
             }
             for check in results
+        ],
+    }
+
+@router.get("/{monitor_id}/analytics")
+def get_monitor_analytics(
+    project_id: UUID,
+    monitor_id: UUID,
+    hours: int = Query(default=24, ge=1, le=720),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    monitor = get_owned_project_monitor(
+        project_id,
+        monitor_id,
+        current_user.id,
+        db,
+    )
+
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(hours=hours)
+
+    filters = (
+        CheckResult.monitor_id == monitor.id,
+        CheckResult.checked_at >= since,
+    )
+
+    totals = db.execute(
+        select(
+            func.count(CheckResult.id),
+            func.coalesce(
+                func.sum(case((CheckResult.status == "up", 1), else_=0)),
+                0,
+            ),
+            func.avg(CheckResult.latency_ms),
+            func.min(CheckResult.latency_ms),
+            func.max(CheckResult.latency_ms),
+        ).where(*filters)
+    ).one()
+
+    total_checks = int(totals[0] or 0)
+    up_checks = int(totals[1] or 0)
+    down_checks = total_checks - up_checks
+
+    uptime_percentage = (
+        round((up_checks / total_checks) * 100, 2)
+        if total_checks
+        else None
+    )
+
+    recent_checks = db.scalars(
+        select(CheckResult)
+        .where(*filters)
+        .order_by(
+            desc(CheckResult.checked_at),
+            desc(CheckResult.id),
+        )
+        .limit(100)
+    ).all()
+
+    return {
+        "monitor_id": str(monitor.id),
+        "window_hours": hours,
+        "since": since,
+        "total_checks": total_checks,
+        "up_checks": up_checks,
+        "down_checks": down_checks,
+        "uptime_percentage": uptime_percentage,
+        "average_latency_ms": (
+            round(float(totals[2]), 2) if totals[2] is not None else None
+        ),
+        "min_latency_ms": totals[3],
+        "max_latency_ms": totals[4],
+        "checks": [
+            {
+                "id": str(check.id),
+                "checked_at": check.checked_at,
+                "status": check.status,
+                "latency_ms": check.latency_ms,
+            }
+            for check in reversed(recent_checks)
         ],
     }

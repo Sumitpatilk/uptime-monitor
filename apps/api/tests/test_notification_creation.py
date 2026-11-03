@@ -1,40 +1,12 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from app.models.entities import NotificationEvent
+from sqlalchemy.dialects import postgresql
+
 from app.services.check_runner import create_notification_events
 
 
-def test_existing_notification_event_is_not_created_again():
-    incident = SimpleNamespace(id="incident-1")
-    monitor = SimpleNamespace(project_id="project-1")
-
-    channel = SimpleNamespace(
-        id="channel-1",
-        project_id="project-1",
-        type="email",
-        enabled=True,
-    )
-
-    existing_event = SimpleNamespace(
-        id="event-1",
-        incident_id="incident-1",
-        channel_id="channel-1",
-        event_type="incident_opened",
-    )
-
-    db = MagicMock()
-    db.scalars.return_value.all.return_value = [channel]
-    db.scalar.return_value = existing_event
-
-    create_notification_events(
-        incident, monitor, "incident_opened", db
-    )
-
-    db.add.assert_not_called()
-
-
-def test_new_notification_event_is_created():
+def make_notification_context():
     incident = SimpleNamespace(id="incident-1")
     monitor = SimpleNamespace(project_id="project-1")
 
@@ -47,19 +19,42 @@ def test_new_notification_event_is_created():
 
     db = MagicMock()
     db.scalars.return_value.all.return_value = [channel]
-    db.scalar.return_value = None
+
+    return incident, monitor, db
+
+
+def test_notification_insert_uses_on_conflict_do_nothing():
+    incident, monitor, db = make_notification_context()
 
     create_notification_events(
         incident, monitor, "incident_opened", db
     )
 
-    db.add.assert_called_once()
+    db.execute.assert_called_once()
 
-    created_event = db.add.call_args.args[0]
+    statement = db.execute.call_args.args[0]
+    compiled = statement.compile(dialect=postgresql.dialect())
+    sql = str(compiled)
 
-    assert isinstance(created_event, NotificationEvent)
-    assert created_event.incident_id == incident.id
-    assert created_event.channel_id == channel.id
-    assert created_event.event_type == "incident_opened"
-    assert created_event.status == "pending"
-    assert created_event.attempts == 0
+    assert "INSERT INTO notification_events" in sql
+    assert "ON CONFLICT ON CONSTRAINT uq_notification_incident_channel_event DO NOTHING" in sql
+
+    assert compiled.params["incident_id"] == incident.id
+    assert compiled.params["channel_id"] == "channel-1"
+    assert compiled.params["event_type"] == "incident_opened"
+    assert compiled.params["status"] == "pending"
+    assert compiled.params["attempts"] == 0
+
+
+def test_no_notification_insert_when_no_enabled_channels():
+    incident = SimpleNamespace(id="incident-1")
+    monitor = SimpleNamespace(project_id="project-1")
+
+    db = MagicMock()
+    db.scalars.return_value.all.return_value = []
+
+    create_notification_events(
+        incident, monitor, "incident_opened", db
+    )
+
+    db.execute.assert_not_called()

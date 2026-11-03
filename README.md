@@ -65,3 +65,19 @@ Replace `YOUR-USERNAME` with your GitHub username.
 
 ## Security note
 Credentials are for local development only. Before hosted deployment, use strong secrets or a secret manager. Do not expose PostgreSQL publicly. User-configured monitor URLs must later have SSRF protection before checks are implemented.
+
+## Database backup and restore
+
+Create and validate a PostgreSQL backup:
+
+`./scripts/backup-db.sh`
+
+Backups are saved in `./backups/` by default. For a different secure location, set `BACKUP_DIR` before running the script.
+
+Restore into an empty, non-primary database:
+
+`./scripts/restore-db.sh ./backups/your-backup.dump uptime_monitor_restore_test --confirm`
+
+The restore script validates the archive, checks that the target database is empty, and prevents restoring into the configured primary database.
+
+**Security:** Backups may contain sensitive application data. Store them securely and do not commit or share them. The `backups/` directory and dump files are excluded by `.gitignore`.

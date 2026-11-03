@@ -46,6 +46,18 @@ class Settings(BaseSettings):
         le=20,
     )
 
+    # Check-result data retention
+    check_result_retention_days: int = Field(
+        default=90,
+        ge=1,
+        le=3650,
+    )
+    retention_cleanup_batch_size: int = Field(
+        default=1000,
+        ge=1,
+        le=10000,
+    )
+
     model_config = SettingsConfigDict(
         env_file=".env",
         extra="ignore",

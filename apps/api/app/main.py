@@ -7,8 +7,10 @@ from app.core.config import settings
 from app.db.session import engine
 from app.routes.alert_channels import router as alert_channels_router
 from app.routes.checks import router as checks_router
+from app.routes.incidents import router as incidents_router
 from app.routes.monitors import router as monitors_router
 from app.routes.projects import router as projects_router
+from app.routes.status_pages import router as status_pages_router
 from app.routes.auth import router as auth_router
 
 app = FastAPI(
@@ -19,8 +21,10 @@ app = FastAPI(
 
 # Register API routers
 app.include_router(projects_router)
+app.include_router(status_pages_router)
 app.include_router(monitors_router)
 app.include_router(checks_router)
+app.include_router(incidents_router)
 app.include_router(alert_channels_router)
 app.include_router(auth_router)
 
@@ -58,7 +62,12 @@ def health_ready():
         }
 
     except SQLAlchemyError:
-        return {
-            "status": "not_ready",
-            "database": "unavailable",
-        }
+        from fastapi import HTTPException
+
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "status": "not_ready",
+                "database": "unavailable",
+            },
+        )

@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.audit import log_audit_event
 from app.core.csrf import verify_request_origin
 from app.core.dependencies import get_current_user
 from app.db.session import get_db
@@ -59,6 +60,8 @@ def create_monitor(
     )
 
     db.add(monitor)
+    db.flush()
+    log_audit_event(db, project_id, current_user.id, "monitor.created")
     db.commit()
     db.refresh(monitor)
 
@@ -120,6 +123,7 @@ def update_monitor(
     for field, value in update_data.items():
         setattr(monitor, field, value)
 
+    log_audit_event(db, project_id, current_user.id, "monitor.updated")
     db.commit()
     db.refresh(monitor)
 
@@ -152,6 +156,7 @@ def delete_monitor(
             detail="Monitor not found.",
         )
 
+    log_audit_event(db, project_id, current_user.id, "monitor.deleted")
     db.delete(monitor)
     db.commit()
 

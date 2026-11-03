@@ -88,18 +88,16 @@ class MonitorCreate(BaseModel):
 
 
 class MonitorUpdate(BaseModel):
-    name: str | None = Field(default=None, min_length=1, max_length=150)
-    url: str | None = Field(default=None, min_length=8, max_length=2048)
-    interval_seconds: int | None = Field(default=None, ge=30, le=86400)
-    timeout_seconds: int | None = Field(default=None, ge=1, le=30)
-    expected_status: int | None = Field(default=None, ge=100, le=599)
-    enabled: bool | None = None
+    name: str = Field(default=None, min_length=1, max_length=150)
+    url: str = Field(default=None, min_length=8, max_length=2048)
+    interval_seconds: int = Field(default=None, ge=30, le=86400)
+    timeout_seconds: int = Field(default=None, ge=1, le=30)
+    expected_status: int = Field(default=None, ge=100, le=599)
+    enabled: bool = Field(default=None)
 
     @field_validator("name")
     @classmethod
-    def validate_name(cls, value: str | None) -> str | None:
-        if value is None:
-            return value
+    def validate_name(cls, value: str) -> str:
         value = value.strip()
         if not value:
             raise ValueError("Monitor name cannot be empty.")
@@ -107,9 +105,7 @@ class MonitorUpdate(BaseModel):
 
     @field_validator("url")
     @classmethod
-    def validate_url(cls, value: str | None) -> str | None:
-        if value is None:
-            return value
+    def validate_url(cls, value: str) -> str:
         return validate_public_url(value.strip())
 
 
